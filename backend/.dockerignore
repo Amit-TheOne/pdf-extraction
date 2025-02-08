@@ -1,7 +1,19 @@
+# Ignore Python cache & compiled files
 __pycache__/
-.env
 *.pyc
-.DS_Store
-.git
+
+# Ignore Virtual Environment (Docker install dependencies separately)
 venv/
+.env/
+.venv/
+
+# Ignore Logs & System Files
+*.log
+.DS_Store
+
+# Ignore Git Files
+.git/
 .gitignore
+
+# Ignore Render Deployment Config (Not needed inside Docker)
+render.yaml
