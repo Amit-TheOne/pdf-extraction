@@ -1,0 +1,38 @@
+
+# Ignore Python bytecode & cache
+__pycache__/
+*.py[cod]
+*.so
+*.pyo
+
+# Ignore Virtual Environment
+venv/
+env/
+.venv/
+
+# Ignore Logs & Temp Files
+*.log
+logs/
+debug.log
+
+# Ignore Environment Variables & Secrets
+.env
+*.env
+.env.local
+.env.production
+
+# Ignore Database Files (if using SQLite)
+*.sqlite3
+db.sqlite3
+migrations/
+
+# Ignore IDE & Editor Settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+
+# Ignore Git & DS_Store
+.DS_Store
+.git/
