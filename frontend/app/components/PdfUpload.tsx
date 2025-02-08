@@ -3,7 +3,14 @@
 import { useState } from "react";
 import { uploadPdf } from "@/lib/api";
 
-export default function PdfUpload({ onUploadSuccess }) {
+interface UploadSuccessData {
+  id: number;
+  url: string;
+  data: string;
+  formatted_text: string;
+}
+
+export default function PdfUpload({ onUploadSuccess }: { onUploadSuccess: (data: UploadSuccessData) => void }) {
   const [pdfUrl, setPdfUrl] = useState("");
 
   const handleUpload = async () => {

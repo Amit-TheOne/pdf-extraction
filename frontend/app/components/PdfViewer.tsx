@@ -14,14 +14,22 @@ import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 import "@react-pdf-viewer/highlight/lib/styles/index.css";
 
 
-export default function PdfViewer({ pdfId, pdfUrl, extractedData, formattedText }) {
+interface PdfViewerProps {
+  pdfId: number;
+  pdfUrl: string;
+  extractedData: { text: string; page: number; bbox: number[] }[];
+  formattedText: string;
+}
+
+// export default function PdfViewer({ pdfId ,pdfUrl, extractedData, formattedText }: PdfViewerProps) {
+export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
   // const { textData, bboxData, textLoading, bboxLoading } = usePdfData(pdfId);
   const defaultLayout = defaultLayoutPlugin();
   const highlightPluginInstance = highlightPlugin();
-  const { highlight } = highlightPluginInstance;
+  const { jumpToHighlightArea } = highlightPluginInstance;
   const [selectedText, setSelectedText] = useState<string | null>(null);
-  const [scale, setScale] = useState(1);
-  const [pageScale, setPageScale] = useState(1); // Track PDF zoom level
+  // const [scale, setScale] = useState(1);
+  // const [pageScale, setPageScale] = useState(1); // Track PDF zoom level
   // const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricCanvasRef = useRef<Canvas | null>(null);
   const pdfContainerRef = useRef<HTMLDivElement | null>(null);
@@ -66,19 +74,30 @@ export default function PdfViewer({ pdfId, pdfUrl, extractedData, formattedText 
 
 
   // Efficient Bounding Box Highlighting
-  const handleTextClick = useCallback((text) => {
+  interface ExtractedDataItem {
+    text: string;
+    page: number;
+    bbox: number[];
+  }
+
+  type HandleTextClick = (text: string) => void;
+
+  const handleTextClick: HandleTextClick = useCallback((text: string) => {
     setSelectedText(text);
 
     if (!fabricCanvasRef.current || !extractedData || !overlayReady) return;
     fabricCanvasRef.current.clear();
 
-    const matchingItems = extractedData.filter((item) => item.text === text);
+    const matchingItems: ExtractedDataItem[] = extractedData.filter((item) => item.text === text);
 
     requestAnimationFrame(() => {
       matchingItems.forEach((item) => {
-        highlight({
+        jumpToHighlightArea({
           pageIndex: item.page - 1,
-          text: item.text,
+          left: item.bbox[0],
+          top: item.bbox[1],
+          width: item.bbox[2] - item.bbox[0],
+          height: item.bbox[3] - item.bbox[1],
         });
 
         const rect = new Rect({
@@ -91,12 +110,16 @@ export default function PdfViewer({ pdfId, pdfUrl, extractedData, formattedText 
           strokeWidth: 2,
           selectable: false,
         });
-        fabricCanvasRef.current.add(rect);
+        if (fabricCanvasRef.current) {
+          fabricCanvasRef.current.add(rect);
+        }
       });
 
-      fabricCanvasRef.current.renderAll();
+      if (fabricCanvasRef.current) {
+        fabricCanvasRef.current.renderAll();
+      }
     });
-  }, [extractedData, overlayReady]);
+  }, [extractedData, overlayReady, jumpToHighlightArea]);
 
   // Memoized Extracted Text Rendering
   const formatText = useMemo(() => {
@@ -115,7 +138,7 @@ export default function PdfViewer({ pdfId, pdfUrl, extractedData, formattedText 
         {item.text}
       </span>
     ));
-  }, [extractedData, selectedText, handleTextClick]);
+  }, [extractedData]);
 
 
   return (

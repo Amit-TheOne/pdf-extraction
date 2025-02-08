@@ -2,9 +2,6 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
-  "engines": {
-  "node": "20"
-},
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -17,7 +14,6 @@
     "@react-pdf-viewer/highlight": "^3.12.0",
     "@tanstack/react-query": "^5.66.0",
     "axios": "^1.7.9",
-    "canvas": "^2.11.2",
     "fabric": "^6.5.4",
     "next": "15.1.6",
     "react": "^19.0.0",
