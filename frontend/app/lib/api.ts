@@ -1,7 +1,9 @@
 import axios from "axios";
 
-const API_BASE_URL = "http://localhost:8000"; // Update this when deployed
-// const API_BASE_URL = "http://127.0.0.1:8000"; // Update this when deployed
+// const API_BASE_URL = "http://localhost:8000"; // Update this when deployed
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
 
 // Upload PDF URL to FastAPI
 export const uploadPdf = async (pdfUrl: string) => {
