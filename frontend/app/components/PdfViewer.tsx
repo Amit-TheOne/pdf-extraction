@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Viewer, Worker, SpecialZoomLevel } from "@react-pdf-viewer/core";
 import { defaultLayoutPlugin } from "@react-pdf-viewer/default-layout";
 import { highlightPlugin } from "@react-pdf-viewer/highlight";
-// import { usePdfData } from "@/lib/hooks";
 import { Canvas, Rect } from "fabric";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,7 +12,6 @@ import "@react-pdf-viewer/core/lib/styles/index.css";
 import "@react-pdf-viewer/default-layout/lib/styles/index.css";
 import "@react-pdf-viewer/highlight/lib/styles/index.css";
 
-
 interface PdfViewerProps {
   pdfId: number;
   pdfUrl: string;
@@ -21,27 +19,27 @@ interface PdfViewerProps {
   formattedText: string;
 }
 
-// export default function PdfViewer({ pdfId ,pdfUrl, extractedData, formattedText }: PdfViewerProps) {
+interface ExtractedDataItem {
+  text: string;
+  page: number;
+  bbox: number[];
+}
+
+type HandleTextClick = (text: string) => void;
+
 export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
-  // const { textData, bboxData, textLoading, bboxLoading } = usePdfData(pdfId);
   const defaultLayout = defaultLayoutPlugin();
   const highlightPluginInstance = highlightPlugin();
   const { jumpToHighlightArea } = highlightPluginInstance;
   const [selectedText, setSelectedText] = useState<string | null>(null);
-  // const [scale, setScale] = useState(1);
-  // const [pageScale, setPageScale] = useState(1); // Track PDF zoom level
-  // const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricCanvasRef = useRef<Canvas | null>(null);
   const pdfContainerRef = useRef<HTMLDivElement | null>(null);
   const [overlayReady, setOverlayReady] = useState(false);
 
-
-  // Initialize Fabric.js Overlay
   useEffect(() => {
     if (!pdfContainerRef.current) return;
 
     // Initialize Fabric.js canvas
-
     const pdfViewerLayer = pdfContainerRef.current.querySelector(".rpv-core__page-layer");
     if (!pdfViewerLayer) return;
 
@@ -54,17 +52,15 @@ export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
 
     pdfViewerLayer.appendChild(canvasElement);
 
-
     const fabricCanvas = new Canvas(canvasElement, { selection: false });
     fabricCanvasRef.current = fabricCanvas;
-
 
     fabricCanvas.setDimensions({
       width: pdfViewerLayer.clientWidth,
       height: pdfViewerLayer.clientHeight,
     });
 
-    setOverlayReady(true); // Overlay is now properly set
+    setOverlayReady(true);
 
     return () => {
       fabricCanvas.dispose();
@@ -72,15 +68,6 @@ export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
     };
   }, []);
 
-
-  // Efficient Bounding Box Highlighting
-  interface ExtractedDataItem {
-    text: string;
-    page: number;
-    bbox: number[];
-  }
-
-  type HandleTextClick = (text: string) => void;
 
   const handleTextClick: HandleTextClick = useCallback((text: string) => {
     setSelectedText(text);
@@ -121,28 +108,25 @@ export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
     });
   }, [extractedData, overlayReady, jumpToHighlightArea]);
 
+
   // Memoized Extracted Text Rendering
   const formatText = useMemo(() => {
-    // const matchingItem = extractedData.find((item) => item.text === children);
-
     return extractedData.map((item, index) => (
       <span
         key={index}
-        // className={`cursor-pointer clickable-text hover:bg-green-400 ${
-        //   selectedText === item.text ? "bg-yellow-300" : ""
-        // }`}
-        className="clickable-text"
-      // onClick={() => matchingItem && handleTextClick(matchingItem.text)}
-      // onClick={() => handleTextClick(item.text)}
+        className={`cursor-pointer clickable-text hover:bg-green-400 ${selectedText === item.text ? "bg-yellow-300" : ""
+          }`}
+        onClick={() => handleTextClick(item.text)}
       >
         {item.text}
       </span>
     ));
-  }, [extractedData]);
+  }, [extractedData, selectedText, handleTextClick]);
 
 
   return (
     <div className="flex h-full">
+
       {/* PDF Viewer */}
       <div ref={pdfContainerRef} className="relative w-5/12 overflow-hidden">
         <Worker workerUrl={`https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js`}>
@@ -150,15 +134,12 @@ export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
             fileUrl={pdfUrl}
             plugins={[defaultLayout, highlightPluginInstance]}
             defaultScale={SpecialZoomLevel.PageFit} // Ensure proper scaling
-          // onZoom={handleZoomChange} // Capture zoom changes
           />
         </Worker>
-        {/* <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full pointer-events-none border-2 border-black bg-yellow-200"/> */}
       </div>
 
       {/* Extracted Text */}
-      <div className="ml-8 px-4 py-4 w-7/12 bg-gray-200 text-zinc-950 ">
-        {/* <h2>Extracted Text</h2> */}
+      <div className="ml-8 px-4 py-4 w-7/12 bg-gray-200 text-zinc-950">
         <div className="h-full overflow-auto px-4 py-6">
           <ReactMarkdown
             className="break-words whitespace-pre-wrap text-center leading-6 text-sm"
@@ -166,7 +147,8 @@ export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
             rehypePlugins={[rehypeRaw]} // Enables raw HTML rendering
             components={{
               span: ({ children }) => {
-                const matchingItem = extractedData.find((item) => item.text === children);
+                const text = String(children);
+                const matchingItem = extractedData.find((item) => item.text === text);
 
                 return (
                   <span
@@ -174,13 +156,13 @@ export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
                       }`}
                     onClick={() => matchingItem && handleTextClick(matchingItem.text)}
                   >
-                    {children}
+                    {text}
                   </span>
                 )
               }
             }}
           >
-            {formatText.map((item) => item.props.children).join(" ")}
+            {formatText.map((item) => item.props.children).join("  ")}
           </ReactMarkdown>
         </div>
       </div>

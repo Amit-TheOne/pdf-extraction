@@ -1,5 +1,7 @@
 "use client";
 
+// For future use 
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 
