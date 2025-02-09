@@ -11,6 +11,7 @@ import asyncio
 from models import PDF, PDFText, BoundingBox
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 from dotenv import load_dotenv
 from sqlalchemy import delete
 
@@ -39,9 +40,15 @@ async def init_db():
 @app.on_event("startup")
 async def on_startup():
     await init_db()
+    asyncio.create_task(ping_db_periodically())
 
 
-# asyncio.run(init_db())
+# Periodically ping the database to keep the connection alive
+async def ping_db_periodically():
+    while True:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        await asyncio.sleep(30)  # Ping every 30 seconds
 
 
 class PDFRequest(BaseModel):
@@ -56,15 +63,30 @@ async def download_pdf(pdf_url, save_path):
             with open(save_path, 'wb') as f:
                 f.write(await response.read())
 
-def is_pdf_searchable(pdf_path):
-    """Check if a PDF contains searchable text"""
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            if page.extract_text():
-                return True
-    return False
 
-def extract_text_and_bboxes(pdf_path):
+async def is_pdf_searchable(pdf_path):
+    """Check if a PDF contains searchable text asynchronously"""
+    try:
+        return await asyncio.to_thread(_is_pdf_searchable, pdf_path)
+    except Exception:
+        return False
+
+    
+def _is_pdf_searchable(pdf_path):
+    """Check if a PDF contains searchable text, handling potential issues."""
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            return any(page.extract_text() for page in pdf.pages)
+    except Exception:
+        return False
+
+
+async def extract_text_and_bboxes(pdf_path):
+    """Extract text and bounding boxes asynchronously"""
+    return await asyncio.to_thread(_extract_text_and_bboxes, pdf_path)
+
+
+def _extract_text_and_bboxes(pdf_path):
     """Extract text and bounding boxes from a searchable PDF"""
     extracted_data = []
     with pdfplumber.open(pdf_path) as pdf:
@@ -79,14 +101,18 @@ def extract_text_and_bboxes(pdf_path):
     return extracted_data
 
 
-def extract_text_from_images(pdf_path):
-    """Extract text from a scanned PDF using OCR"""
-    extracted_text = ""
-    images = convert_from_path(pdf_path)
-    for image in images:
-        text = pytesseract.image_to_string(image)
-        extracted_text += text + "\n"
-    return extracted_text
+
+async def extract_text_from_images(pdf_path):
+    """Extract text from a scanned PDF asynchronously using parallel OCR"""
+    extracted_texts = ""
+    images = await asyncio.to_thread(convert_from_path, pdf_path)  # Convert PDF to images asynchronously
+
+    # Run OCR in parallel on all pages
+    ocr_tasks = [asyncio.to_thread(pytesseract.image_to_string, img) for img in images]
+    extracted_texts = await asyncio.gather(*ocr_tasks)  # Runs all OCR tasks in parallel
+
+    return "\n".join(extracted_texts)
+
 
 def group_text_by_lines(extracted_data):
     """Groups words into lines based on bounding box Y-coordinates."""
@@ -129,32 +155,40 @@ async def process_pdf(request: PDFRequest, db: AsyncSession = Depends(get_db)):
         pdf_id = new_pdf.id
         pdf_url = new_pdf.url
 
-        # pdf_url = pdf_url
-
         extracted_data = []
         extracted_text = ""
 
-        if is_pdf_searchable(pdf_path):
-            extracted_data = extract_text_and_bboxes(pdf_path)
+        if await is_pdf_searchable(pdf_path):
+            extracted_data = await extract_text_and_bboxes(pdf_path)
+
             # Group text into paragraphs
             formatted_text = group_text_by_lines(extracted_data)
-            for item in extracted_data:
-                db.add(PDFText(pdf_id=new_pdf.id, text=item["text"], page_number=item["page"]))
-                db.add(BoundingBox(pdf_id=new_pdf.id, text=item["text"],
-                                   x0=item["bbox"][0], y0=item["bbox"][1], 
-                                   x1=item["bbox"][2], y1=item["bbox"][3], 
-                                   page_number=item["page"]))
+
+            pdf_texts = [PDFText(pdf_id=pdf_id, text=item["text"], page_number=item["page"]) for item in extracted_data]
+            bounding_boxes = [
+                BoundingBox(pdf_id=pdf_id, text=item["text"],
+                            x0=item["bbox"][0], y0=item["bbox"][1],
+                            x1=item["bbox"][2], y1=item["bbox"][3],
+                            page_number=item["page"])
+                for item in extracted_data
+            ]
+
+            db.add_all(pdf_texts + bounding_boxes)
             await db.commit()
+
             return {
                 "id": pdf_id,
                 "url": pdf_url,
                 "data": extracted_data,
                 "formatted_text": formatted_text
             }
+        
         else:
-            extracted_text = extract_text_from_images(pdf_path)
-            db.add(PDFText(pdf_id=new_pdf.id, text=extracted_text, page_number=1))
+            extracted_text = await extract_text_from_images(pdf_path)
+            db_text = PDFText(pdf_id=pdf_id, text=extracted_text, page_number=1)
+            db.add(db_text)
             await db.commit()
+
             return {
                 "id": pdf_id,
                 "url": pdf_url,
@@ -168,6 +202,16 @@ async def process_pdf(request: PDFRequest, db: AsyncSession = Depends(get_db)):
     finally:
         os.remove(pdf_path)
 
+
+
+# Health-check endpoint
+@app.get("/health-check")
+async def health_check(db: AsyncSession = Depends(get_db)):
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"status": "Server is operational. All Good!"}
+    except Exception:
+        return {"status": "Error"}
 
 
 # Endpoints for future use

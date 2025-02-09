@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from urllib.parse import urlparse, urlunparse
 
-# Get PostgreSQL connection URL from .env
+load_dotenv()
+
 DATABASE_URL = os.getenv("DB_URL")
 
 if not DATABASE_URL:

@@ -6,7 +6,7 @@ class PDF(Base):
     __tablename__ = "pdfs"
 
     id = Column(Integer, primary_key=True, index=True)
-    url = Column(String, unique=True, nullable=False)
+    url = Column(String, nullable=False)
 
     texts = relationship("PDFText", back_populates="pdf", cascade="all, delete-orphan")
     bounding_boxes = relationship("BoundingBox", back_populates="pdf", cascade="all, delete-orphan")
