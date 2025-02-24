@@ -19,12 +19,12 @@ from typing import List, Dict
 load_dotenv()
 CORS_ORIGIN = os.getenv("CLIENT_URL")
 
-# Set explicit Poppler path (for Windows)
-POPPLER_PATH = r"C:\poppler-24.08.0\Library\bin"  # Update this path!
+# # Set explicit Poppler path (for Windows)
+# POPPLER_PATH = r"C:\poppler-24.08.0\Library\bin"
 
-# Set explicit Tesseract path (for Windows)
-TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Update this path!
-pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH  # Tell Python where to find Tesseract
+# # Set explicit Tesseract path (for Windows)
+# TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
 app = FastAPI()
 
@@ -90,7 +90,8 @@ def _extract_text_and_bboxes(pdf_path):
 async def extract_text_from_images(pdf_path: str) -> List[Dict]:
     """Extract text and generate bounding boxes asynchronously using OCR."""
     extracted_data = []
-    images = await asyncio.to_thread(convert_from_path, pdf_path, poppler_path=POPPLER_PATH)
+    # images = await asyncio.to_thread(convert_from_path, pdf_path, poppler_path=POPPLER_PATH) # For Windows
+    images = await asyncio.to_thread(convert_from_path, pdf_path)
 
     # Run OCR in parallel on all pages
     ocr_tasks = [asyncio.to_thread(pytesseract.image_to_data, img, output_type=pytesseract.Output.DICT) for img in images]
