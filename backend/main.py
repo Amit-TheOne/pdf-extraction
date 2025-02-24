@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiohttp
@@ -6,18 +6,25 @@ import os
 import pdfplumber
 import pytesseract
 from pdf2image import convert_from_path
-from database import engine, Base, get_db
-import asyncio
-from models import PDF, PDFText, BoundingBox
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import text
 from dotenv import load_dotenv
-from sqlalchemy import delete
+import asyncio
+from typing import List, Dict
+# from sqlalchemy.ext.asyncio import AsyncSession
+# from sqlalchemy.future import select
+# from sqlalchemy import text
+# from sqlalchemy import delete
+
 
 
 load_dotenv()
 CORS_ORIGIN = os.getenv("CLIENT_URL")
+
+# Set explicit Poppler path (for Windows)
+POPPLER_PATH = r"C:\poppler-24.08.0\Library\bin"  # Update this path!
+
+# Set explicit Tesseract path (for Windows)
+TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Update this path!
+pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH  # Tell Python where to find Tesseract
 
 app = FastAPI()
 
@@ -28,27 +35,6 @@ app.add_middleware(
     allow_methods=["*"],  
     allow_headers=["*"],
 )
-
-
-# Initialize DB at app startup
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-
-# Register the on_startup event to initialize the database
-@app.on_event("startup")
-async def on_startup():
-    await init_db()
-    asyncio.create_task(ping_db_periodically())
-
-
-# Periodically ping the database to keep the connection alive
-async def ping_db_periodically():
-    while True:
-        async with engine.begin() as conn:
-            await conn.execute(text("SELECT 1"))
-        await asyncio.sleep(30)  # Ping every 30 seconds
 
 
 class PDFRequest(BaseModel):
@@ -101,45 +87,54 @@ def _extract_text_and_bboxes(pdf_path):
     return extracted_data
 
 
-
-async def extract_text_from_images(pdf_path):
-    """Extract text from a scanned PDF asynchronously using parallel OCR"""
-    extracted_texts = ""
-    images = await asyncio.to_thread(convert_from_path, pdf_path)  # Convert PDF to images asynchronously
+async def extract_text_from_images(pdf_path: str) -> List[Dict]:
+    """Extract text and generate bounding boxes asynchronously using OCR."""
+    extracted_data = []
+    images = await asyncio.to_thread(convert_from_path, pdf_path, poppler_path=POPPLER_PATH)
 
     # Run OCR in parallel on all pages
-    ocr_tasks = [asyncio.to_thread(pytesseract.image_to_string, img) for img in images]
-    extracted_texts = await asyncio.gather(*ocr_tasks)  # Runs all OCR tasks in parallel
+    ocr_tasks = [asyncio.to_thread(pytesseract.image_to_data, img, output_type=pytesseract.Output.DICT) for img in images]
+    texts = await asyncio.gather(*ocr_tasks)  # Runs all OCR tasks in parallel
 
-    return "\n".join(extracted_texts)
+    for page_number, text in enumerate(texts):
+        for i in range(len(text["text"])):  
+            word = text["text"][i].strip()
+            if word:  # Ignore empty text
+                extracted_data.append({
+                    "text": word,
+                    "bbox": [text["left"][i], text["top"][i], text["left"][i] + text["width"][i], text["top"][i] + text["height"][i]],
+                    "page": page_number + 1
+                })
+
+    return extracted_data
 
 
-def group_text_by_lines(extracted_data):
-    """Groups words into lines based on bounding box Y-coordinates."""
-    lines = []
-    current_line = []
-    current_y = None
+# def group_text_by_lines(extracted_data):
+#     """Groups words into lines based on bounding box Y-coordinates."""
+#     lines = []
+#     current_line = []
+#     current_y = None
 
-    for item in extracted_data:
-        text, bbox = item["text"], item["bbox"]
-        y_coord = round(bbox[1], 1)  # Normalize Y-coordinate
+#     for item in extracted_data:
+#         text, bbox = item["text"], item["bbox"]
+#         y_coord = round(bbox[1], 1)  # Normalize Y-coordinate
 
-        if current_y is None or abs(y_coord - current_y) < 5:  # Adjust threshold as needed
-            current_line.append(text)
-        else:
-            lines.append(" ".join(current_line))
-            current_line = [text]
+#         if current_y is None or abs(y_coord - current_y) < 5:  # Adjust threshold as needed
+#             current_line.append(text)
+#         else:
+#             lines.append(" ".join(current_line))
+#             current_line = [text]
 
-        current_y = y_coord
+#         current_y = y_coord
 
-    if current_line:
-        lines.append(" ".join(current_line))
+#     if current_line:
+#         lines.append(" ".join(current_line))
 
-    return "\n".join(lines)  # Ensures paragraph separation
+#     return "\n".join(lines)  # Ensures paragraph separation
 
 
 @app.post("/extract") 
-async def process_pdf(request: PDFRequest, db: AsyncSession = Depends(get_db)):
+async def process_pdf(request: PDFRequest):
     """API endpoint to process a PDF from URL"""
     pdf_url = request.pdf_url
     pdf_path = "temp.pdf"
@@ -147,56 +142,30 @@ async def process_pdf(request: PDFRequest, db: AsyncSession = Depends(get_db)):
     await download_pdf(pdf_url, pdf_path)
 
     try:
-        new_pdf = PDF(url=pdf_url)
-        db.add(new_pdf)
-        await db.flush()
-        await db.refresh(new_pdf)
-        
-        pdf_id = new_pdf.id
-        pdf_url = new_pdf.url
-
         extracted_data = []
-        extracted_text = ""
+        extracted_text = []
 
         if await is_pdf_searchable(pdf_path):
             extracted_data = await extract_text_and_bboxes(pdf_path)
 
             # Group text into paragraphs
-            formatted_text = group_text_by_lines(extracted_data)
-
-            pdf_texts = [PDFText(pdf_id=pdf_id, text=item["text"], page_number=item["page"]) for item in extracted_data]
-            bounding_boxes = [
-                BoundingBox(pdf_id=pdf_id, text=item["text"],
-                            x0=item["bbox"][0], y0=item["bbox"][1],
-                            x1=item["bbox"][2], y1=item["bbox"][3],
-                            page_number=item["page"])
-                for item in extracted_data
-            ]
-
-            db.add_all(pdf_texts + bounding_boxes)
-            await db.commit()
+            # formatted_text = group_text_by_lines(extracted_data)
 
             return {
-                "id": pdf_id,
                 "url": pdf_url,
                 "data": extracted_data,
-                "formatted_text": formatted_text
+                # "formatted_text": formatted_text
             }
         
         else:
             extracted_text = await extract_text_from_images(pdf_path)
-            db_text = PDFText(pdf_id=pdf_id, text=extracted_text, page_number=1)
-            db.add(db_text)
-            await db.commit()
 
             return {
-                "id": pdf_id,
                 "url": pdf_url,
-                "text": extracted_text
+                "data": extracted_text
             }
 
     except Exception as e:
-        await db.rollback()  # Rollback on error
         raise e
 
     finally:
@@ -206,80 +175,78 @@ async def process_pdf(request: PDFRequest, db: AsyncSession = Depends(get_db)):
 
 # Health-check endpoint
 @app.get("/health-check")
-async def health_check(db: AsyncSession = Depends(get_db)):
-    try:
-        await db.execute(text("SELECT 1"))
-        return {"status": "Server is operational. All Good!"}
-    except Exception:
-        return {"status": "Error"}
+async def health_check():
+    return {"status": "Server is operational. All Good!"}
+
+
 
 
 # Endpoints for future use
 
-# for fetching all pdfs
-@app.get("/pdfs")
-async def get_all_pdfs(db: AsyncSession = Depends(get_db)):
-    """Fetch all processed PDFs"""
-    result = await db.execute(select(PDF))
-    pdfs = result.scalars().all()
-    return {"pdfs": [{"id": pdf.id, "url": pdf.url} for pdf in pdfs]}
+# # for fetching all pdfs
+# @app.get("/pdfs")
+# async def get_all_pdfs(db: AsyncSession = Depends(get_db)):
+#     """Fetch all processed PDFs"""
+#     result = await db.execute(select(PDF))
+#     pdfs = result.scalars().all()
+#     return {"pdfs": [{"id": pdf.id, "url": pdf.url} for pdf in pdfs]}
 
 
-# for fetching texts of pdf by id
-@app.get("/pdf/{pdf_id}/text")
-async def get_pdf_text(pdf_id: int, db: AsyncSession = Depends(get_db)):
-    """Fetch extracted text for a given PDF"""
-    result = await db.execute(select(PDFText).where(PDFText.pdf_id == pdf_id))
-    texts = result.scalars().all()
+# # for fetching texts of pdf by id
+# @app.get("/pdf/{pdf_id}/text")
+# async def get_pdf_text(pdf_id: int, db: AsyncSession = Depends(get_db)):
+#     """Fetch extracted text for a given PDF"""
+#     result = await db.execute(select(PDFText).where(PDFText.pdf_id == pdf_id))
+#     texts = result.scalars().all()
     
-    if not texts:
-        return {"message": "No text found for the given PDF ID"}
+#     if not texts:
+#         return {"message": "No text found for the given PDF ID"}
     
-    return {"pdf_id": pdf_id, "texts": [{"text": t.text, "page_number": t.page_number} for t in texts]}
+#     return {"pdf_id": pdf_id, "texts": [{"text": t.text, "page_number": t.page_number} for t in texts]}
 
 
-# for fetching bounding box of pdf by id
-@app.get("/pdf/{pdf_id}/bounding_boxes")
-async def get_pdf_bounding_boxes(pdf_id: int, db: AsyncSession = Depends(get_db)):
-    """Fetch bounding boxes for a given PDF"""
-    result = await db.execute(select(BoundingBox).where(BoundingBox.pdf_id == pdf_id))
-    boxes = result.scalars().all()
+# # for fetching bounding box of pdf by id
+# @app.get("/pdf/{pdf_id}/bounding_boxes")
+# async def get_pdf_bounding_boxes(pdf_id: int, db: AsyncSession = Depends(get_db)):
+#     """Fetch bounding boxes for a given PDF"""
+#     result = await db.execute(select(BoundingBox).where(BoundingBox.pdf_id == pdf_id))
+#     boxes = result.scalars().all()
     
-    if not boxes:
-        return {"message": "No bounding boxes found for the given PDF ID"}
+#     if not boxes:
+#         return {"message": "No bounding boxes found for the given PDF ID"}
 
-    return {
-        "pdf_id": pdf_id,
-        "bounding_boxes": [
-            {"text": b.text, "page_number": b.page_number, "bbox": [b.x0, b.y0, b.x1, b.y1]}
-            for b in boxes
-        ]
-    }
+#     return {
+#         "pdf_id": pdf_id,
+#         "bounding_boxes": [
+#             {"text": b.text, "page_number": b.page_number, "bbox": [b.x0, b.y0, b.x1, b.y1]}
+#             for b in boxes
+#         ]
+#     }
 
 
-# for fetching particular pdf by url
-@app.get("/pdf/url")
-async def get_pdf_by_url(url: str, db: AsyncSession = Depends(get_db)):
-    """Fetch PDF details by URL"""
-    result = await db.execute(select(PDF).where(PDF.url == url))
-    pdf = result.scalars().first()
+# # for fetching particular pdf by url
+# @app.get("/pdf/url")
+# async def get_pdf_by_url(url: str, db: AsyncSession = Depends(get_db)):
+#     """Fetch PDF details by URL"""
+#     result = await db.execute(select(PDF).where(PDF.url == url))
+#     pdf = result.scalars().first()
 
-    if not pdf:
-        return {"message": "No PDF found for the given URL"}
+#     if not pdf:
+#         return {"message": "No PDF found for the given URL"}
 
-    return {"pdf_id": pdf.id, "url": pdf.url}
+#     return {"pdf_id": pdf.id, "url": pdf.url}
 
-# for deleting pdf by id
-@app.delete("/pdf/{pdf_id}")
-async def delete_pdf(pdf_id: int, db: AsyncSession = Depends(get_db)):
-    """Delete a PDF and its associated data"""
-    await db.execute(delete(PDFText).where(PDFText.pdf_id == pdf_id))
-    await db.execute(delete(BoundingBox).where(BoundingBox.pdf_id == pdf_id))
-    result = await db.execute(delete(PDF).where(PDF.id == pdf_id))
+# # for deleting pdf by id
+# @app.delete("/pdf/{pdf_id}")
+# async def delete_pdf(pdf_id: int, db: AsyncSession = Depends(get_db)):
+#     """Delete a PDF and its associated data"""
+#     await db.execute(delete(PDFText).where(PDFText.pdf_id == pdf_id))
+#     await db.execute(delete(BoundingBox).where(BoundingBox.pdf_id == pdf_id))
+#     result = await db.execute(delete(PDF).where(PDF.id == pdf_id))
 
-    await db.commit()
+#     await db.commit()
 
-    if result.rowcount == 0:
-        return {"message": "PDF not found"}
+#     if result.rowcount == 0:
+#         return {"message": "PDF not found"}
     
-    return {"message": f"PDF with ID {pdf_id} deleted"}
+#     return {"message": f"PDF with ID {pdf_id} deleted"}
