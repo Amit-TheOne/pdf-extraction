@@ -119,7 +119,7 @@ async def extract_text_from_images(pdf_path: str) -> List[Dict]:
         return page_texts
 
     # Process each page separately to avoid memory overload
-    for page_number, image in enumerate(convert_from_path(pdf_path, dpi=150)):
+    for page_number, image in enumerate(convert_from_path(pdf_path, dpi=100)):
         extracted_data.extend(await process_page(image, page_number))
         
         # Free memory after processing each page
