@@ -248,7 +248,7 @@ export default function PdfViewer({ pdfUrl, extractedData }: PdfViewerProps) {
   return (
     <div className="flex h-full">
       <div ref={pdfContainerRef} className="relative w-5/12 overflow-hidden">
-        <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
+        <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
           <Viewer
             fileUrl={pdfUrl}
             plugins={[defaultLayout, highlightPluginInstance]}
