@@ -112,41 +112,76 @@ def _extract_text_and_bboxes(pdf_path):
 #     return extracted_data
 
 
+# async def extract_text_from_images(pdf_path: str) -> List[Dict]:
+#     """Efficiently extract text from scanned PDFs using OCR with limited concurrency."""
+    
+#     extracted_data = []
+#     semaphore = asyncio.Semaphore(1)  # Limits concurrent OCR tasks
+
+#     async def process_page(image):
+#         """Process a single page with OCR while limiting memory usage."""
+#         async with semaphore:  # Ensures only 2 OCR tasks run concurrently
+#             return await asyncio.to_thread(
+#                 pytesseract.image_to_data, image, output_type=pytesseract.Output.DICT
+#             )
+
+#     # Convert all pages to images first
+#     # images = convert_from_path(pdf_path, poppler_path=POPPLER_PATH)  # For Windows
+#     images = convert_from_path(pdf_path)
+
+#     # Create OCR tasks for multiple pages at once
+#     ocr_tasks = [process_page(images[img]) for img in range(len(images))]
+    
+#     # Run multiple OCR tasks concurrently, but limited by the semaphore
+#     texts_data = await asyncio.gather(*ocr_tasks)
+
+#     for page_number, text in enumerate(texts_data):
+#         for i in range(len(text["text"])):
+#             word = text["text"][i].strip()
+#             if word:
+#                 extracted_data.append({
+#                     "text": word,
+#                     "bbox": [text["left"][i], text["top"][i], text["left"][i] + text["width"][i], text["top"][i] + text["height"][i]],
+#                     "page": page_number + 1
+#                 })
+
+#     return extracted_data
+
+
 async def extract_text_from_images(pdf_path: str) -> List[Dict]:
-    """Efficiently extract text from scanned PDFs using OCR with limited concurrency."""
+    """Extract text from scanned PDFs using OCR without memory leaks."""
     
     extracted_data = []
-    semaphore = asyncio.Semaphore(1)  # Limits concurrent OCR tasks
 
-    async def process_page(image):
+    async def process_page(image, page_number):
         """Process a single page with OCR while limiting memory usage."""
-        async with semaphore:  # Ensures only 2 OCR tasks run concurrently
-            return await asyncio.to_thread(
-                pytesseract.image_to_data, image, output_type=pytesseract.Output.DICT
-            )
+        text_data = await asyncio.to_thread(
+            pytesseract.image_to_data, image, output_type=pytesseract.Output.DICT
+        )
 
-    # Convert all pages to images first
-    # images = convert_from_path(pdf_path, poppler_path=POPPLER_PATH)  # For Windows
-    images = convert_from_path(pdf_path)
-
-    # Create OCR tasks for multiple pages at once
-    ocr_tasks = [process_page(images[img]) for img in range(len(images))]
-    
-    # Run multiple OCR tasks concurrently, but limited by the semaphore
-    texts_data = await asyncio.gather(*ocr_tasks)
-
-    for page_number, text in enumerate(texts_data):
-        for i in range(len(text["text"])):
-            word = text["text"][i].strip()
+        page_texts = []
+        for i in range(len(text_data["text"])):
+            word = text_data["text"][i].strip()
             if word:
-                extracted_data.append({
+                page_texts.append({
                     "text": word,
-                    "bbox": [text["left"][i], text["top"][i], text["left"][i] + text["width"][i], text["top"][i] + text["height"][i]],
+                    "bbox": [text_data["left"][i], text_data["top"][i], text_data["left"][i] + text_data["width"][i], text_data["top"][i] + text_data["height"][i]],
                     "page": page_number + 1
                 })
 
-    return extracted_data
+        return page_texts
 
+    # Process each page one at a time to reduce memory usage
+    page_number = 0
+    for image in convert_from_path(pdf_path):
+        extracted_data.extend(await process_page(image, page_number))
+        page_number += 1
+        
+        # Free memory after processing each page
+        del image
+        gc.collect()
+
+    return extracted_data
 
 
 
