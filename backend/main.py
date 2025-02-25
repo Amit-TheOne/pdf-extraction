@@ -98,7 +98,7 @@ async def extract_text_from_images(pdf_path: str) -> List[Dict]:
         """Process a single page with OCR while limiting memory usage."""
 
         # Convert to grayscale & reduce resolution
-        image = image.resize((image.width // 2, image.height // 2))  # Reduce size by half
+        # image = image.convert("L").resize((image.width // 2, image.height // 2))  # Reduce size by half
         
         # Perform OCR
         text_data = await asyncio.to_thread(
