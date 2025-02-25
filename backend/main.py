@@ -116,7 +116,7 @@ async def extract_text_from_images(pdf_path: str) -> List[Dict]:
     """Efficiently extract text from scanned PDFs using OCR with limited concurrency."""
     
     extracted_data = []
-    semaphore = asyncio.Semaphore(2)  # Limits concurrent OCR tasks
+    semaphore = asyncio.Semaphore(1)  # Limits concurrent OCR tasks
 
     async def process_page(image):
         """Process a single page with OCR while limiting memory usage."""
@@ -146,6 +146,8 @@ async def extract_text_from_images(pdf_path: str) -> List[Dict]:
                 })
 
     return extracted_data
+
+
 
 
 
