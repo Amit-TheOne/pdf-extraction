@@ -9,6 +9,7 @@ from pdf2image import convert_from_path
 from dotenv import load_dotenv
 import asyncio
 from typing import List, Dict
+import gc
 # from sqlalchemy.ext.asyncio import AsyncSession
 # from sqlalchemy.future import select
 # from sqlalchemy import text
@@ -87,20 +88,57 @@ def _extract_text_and_bboxes(pdf_path):
     return extracted_data
 
 
+# async def extract_text_from_images(pdf_path: str) -> List[Dict]:
+#     """Extract text and generate bounding boxes asynchronously using OCR."""
+#     extracted_data = []
+    
+#     images = await asyncio.to_thread(convert_from_path, pdf_path, poppler_path=POPPLER_PATH) # For Windows
+#     # images = await asyncio.to_thread(convert_from_path, pdf_path)
+
+#     # Run OCR in parallel on all pages
+#     ocr_tasks = [asyncio.to_thread(pytesseract.image_to_data, img, output_type=pytesseract.Output.DICT) for img in images]
+#     texts = await asyncio.gather(*ocr_tasks)  # Runs all OCR tasks in parallel
+
+#     for page_number, text in enumerate(texts):
+#         for i in range(len(text["text"])):  
+#             word = text["text"][i].strip()
+#             if word:  # Ignore empty text
+#                 extracted_data.append({
+#                     "text": word,
+#                     "bbox": [text["left"][i], text["top"][i], text["left"][i] + text["width"][i], text["top"][i] + text["height"][i]],
+#                     "page": page_number + 1
+#                 })
+
+#     return extracted_data
+
+
 async def extract_text_from_images(pdf_path: str) -> List[Dict]:
-    """Extract text and generate bounding boxes asynchronously using OCR."""
+    """Efficiently extract text from scanned PDFs using OCR with limited concurrency."""
+    
     extracted_data = []
-    # images = await asyncio.to_thread(convert_from_path, pdf_path, poppler_path=POPPLER_PATH) # For Windows
-    images = await asyncio.to_thread(convert_from_path, pdf_path)
+    semaphore = asyncio.Semaphore(2)  # Limits concurrent OCR tasks
 
-    # Run OCR in parallel on all pages
-    ocr_tasks = [asyncio.to_thread(pytesseract.image_to_data, img, output_type=pytesseract.Output.DICT) for img in images]
-    texts = await asyncio.gather(*ocr_tasks)  # Runs all OCR tasks in parallel
+    async def process_page(image):
+        """Process a single page with OCR while limiting memory usage."""
+        async with semaphore:  # Ensures only 2 OCR tasks run concurrently
+            return await asyncio.to_thread(
+                pytesseract.image_to_data, image, output_type=pytesseract.Output.DICT
+            )
 
-    for page_number, text in enumerate(texts):
-        for i in range(len(text["text"])):  
+    # Convert all pages to images first
+    # images = convert_from_path(pdf_path, poppler_path=POPPLER_PATH)  # For Windows
+    images = convert_from_path(pdf_path)
+
+    # Create OCR tasks for multiple pages at once
+    ocr_tasks = [process_page(images[img]) for img in range(len(images))]
+    
+    # Run multiple OCR tasks concurrently, but limited by the semaphore
+    texts_data = await asyncio.gather(*ocr_tasks)
+
+    for page_number, text in enumerate(texts_data):
+        for i in range(len(text["text"])):
             word = text["text"][i].strip()
-            if word:  # Ignore empty text
+            if word:
                 extracted_data.append({
                     "text": word,
                     "bbox": [text["left"][i], text["top"][i], text["left"][i] + text["width"][i], text["top"][i] + text["height"][i]],
@@ -108,6 +146,7 @@ async def extract_text_from_images(pdf_path: str) -> List[Dict]:
                 })
 
     return extracted_data
+
 
 
 # def group_text_by_lines(extracted_data):
