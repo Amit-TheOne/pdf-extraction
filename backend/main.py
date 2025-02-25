@@ -148,17 +148,59 @@ def _extract_text_and_bboxes(pdf_path):
 #     return extracted_data
 
 
+# async def extract_text_from_images(pdf_path: str) -> List[Dict]:
+#     """Extract text from scanned PDFs using OCR without memory leaks."""
+    
+#     extracted_data = []
+
+#     async def process_page(image, page_number):
+#         """Process a single page with OCR while limiting memory usage."""
+#         text_data = await asyncio.to_thread(
+#             pytesseract.image_to_data, image, output_type=pytesseract.Output.DICT
+#         )
+
+#         page_texts = []
+#         for i in range(len(text_data["text"])):
+#             word = text_data["text"][i].strip()
+#             if word:
+#                 page_texts.append({
+#                     "text": word,
+#                     "bbox": [text_data["left"][i], text_data["top"][i], text_data["left"][i] + text_data["width"][i], text_data["top"][i] + text_data["height"][i]],
+#                     "page": page_number + 1
+#                 })
+
+#         return page_texts
+
+#     # Process each page one at a time to reduce memory usage
+#     page_number = 0
+#     for image in convert_from_path(pdf_path, poppler_path=POPPLER_PATH):  # For Windows
+#         extracted_data.extend(await process_page(image, page_number))
+#         page_number += 1
+        
+#         # Free memory after processing each page
+#         del image
+#         gc.collect()
+
+#     return extracted_data
+
+
 async def extract_text_from_images(pdf_path: str) -> List[Dict]:
-    """Extract text from scanned PDFs using OCR without memory leaks."""
+    """Extract text from scanned PDFs using OCR while reducing memory usage."""
     
     extracted_data = []
 
     async def process_page(image, page_number):
         """Process a single page with OCR while limiting memory usage."""
+        # Convert to grayscale & reduce resolution
+        image = image.convert("L").resize((image.width // 2, image.height // 2))  # Reduce size by half
+        # image = image.convert("L")
+        
+        # Perform OCR
         text_data = await asyncio.to_thread(
             pytesseract.image_to_data, image, output_type=pytesseract.Output.DICT
         )
 
+        # Extract text and bounding boxes
         page_texts = []
         for i in range(len(text_data["text"])):
             word = text_data["text"][i].strip()
@@ -171,13 +213,12 @@ async def extract_text_from_images(pdf_path: str) -> List[Dict]:
 
         return page_texts
 
-    # Process each page one at a time to reduce memory usage
-    page_number = 0
-    for image in convert_from_path(pdf_path):
+    # Process each page separately to avoid memory overload
+    for page_number, image in enumerate(convert_from_path(pdf_path, dpi=150)):  # Reduce DPI to 150
         extracted_data.extend(await process_page(image, page_number))
-        page_number += 1
         
         # Free memory after processing each page
+        image.close()
         del image
         gc.collect()
 
